@@ -1,15 +1,27 @@
 import streamlit as st
-import requests
+import json
+from pathlib import Path
 
-API = "http://127.0.0.1:8000"
+# ---------- FILE SETUP ----------
+DATA_FILE = Path(__file__).parent / "data.json"
 
-# ================= SIDEBAR =================
+if not DATA_FILE.exists():
+    DATA_FILE.write_text("[]")
+
+def load_data():
+    return json.loads(DATA_FILE.read_text())
+
+def save_data(data):
+    DATA_FILE.write_text(json.dumps(data, indent=2))
+
+
+# ---------- SIDEBAR ----------
 st.sidebar.title(" Smart Resource Finder")
 
 st.sidebar.markdown("""
 ### How to Use
 1. Select a subject  
-2. Search for a resource  
+2. Search resources  
 3. Choose the top-rated one
 """)
 
@@ -20,23 +32,21 @@ st.sidebar.markdown("""
 """)
 
 st.sidebar.markdown("---")
-st.sidebar.caption("Built by **Harsh**")
+st.sidebar.caption("Built by **Harsh Dev**")
 
-# ================= MAIN PAGE =================
+
+# ---------- MAIN ----------
 st.title("Smart Resource Finder")
 
-# ---------- FETCH DATA ----------
-response = requests.get(f"{API}/resources")
-resources = response.json()
+resources = load_data()
 
-# ---------- DYNAMIC SUBJECT LIST ----------
+# ---------- SUBJECT FILTER ----------
 subjects = sorted(list(set(r["subject"] for r in resources)))
 selected_subject = st.selectbox("Select Subject", ["All"] + subjects)
 
-# ---------- SEARCH (SUBJECT-WISE ONLY) ----------
+# ---------- SEARCH ----------
 search_query = st.text_input("Search resource (within subject)")
 
-# ---------- FILTER ----------
 filtered = resources
 
 if selected_subject != "All":
@@ -55,26 +65,26 @@ if search_query:
 st.subheader(" Add Resource")
 
 with st.form("add_form"):
-    rid = st.number_input("ID", min_value=1)
     subject = st.text_input("Subject")
     name = st.text_input("Resource Name")
     rtype = st.selectbox("Type", ["Notes", "Video", "Book"])
     link = st.text_input("Resource Link")
-
     submit = st.form_submit_button("Add")
 
     if submit:
-        payload = {
-            "id": rid,
+        new_id = max([r["id"] for r in resources], default=0) + 1
+
+        resources.append({
+            "id": new_id,
             "subject": subject,
             "name": name,
             "resource_type": rtype,
             "link": link,
-
             "avg_rating": 0,
             "rating_count": 0
-        }
-        requests.post(f"{API}/resource", json=payload)
+        })
+
+        save_data(resources)
         st.success("Resource added. Refresh page.")
 
 # ---------- DISPLAY ----------
@@ -85,9 +95,9 @@ if not filtered:
 else:
     for idx, r in enumerate(filtered):
         st.markdown(f"### {r['name']}")
-        st.caption(f"{r['subject']} | {r['resource_type']} ")
+        st.caption(f"{r['subject']} | {r['resource_type']}")
         st.markdown(f"[🔗 Open Resource]({r['link']})")
-        st.write(f" {round(r['avg_rating'], 2)} ({r['rating_count']} ratings)")
+        st.write(f" {round(r['avg_rating'],2)} ({r['rating_count']} ratings)")
 
         rating = st.slider(
             "Rate",
@@ -96,11 +106,9 @@ else:
         )
 
         if st.button("Submit Rating", key=f"btn_{r['id']}_{idx}"):
-            requests.post(
-                f"{API}/rate",
-                params={
-                    "resource_id": r["id"],
-                    "rating": rating
-                }
-            )
+            total = r["avg_rating"] * r["rating_count"] + rating
+            r["rating_count"] += 1
+            r["avg_rating"] = total / r["rating_count"]
+
+            save_data(resources)
             st.success("Rating submitted. Refresh page.")
